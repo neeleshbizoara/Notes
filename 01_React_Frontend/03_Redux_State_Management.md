@@ -611,70 +611,1751 @@ function App() {
 
 ## Q37. Explain normalized state shape. Why is it important for a transaction history module?
 
-**Answer:**
+  **Answer:**
 
-**Normalized** = Store data like a database. Each entity stored by ID, with relationships as IDs (not nested objects).
+  **Normalized** = Store data like a database. Each entity stored by ID, with relationships as IDs (not nested objects).
 
-```jsx
-// ❌ Denormalized (nested) - common mistake
-const state = {
-  accounts: [
-    {
-      id: 'ACC-001',
-      name: 'Savings',
-      transactions: [                  // Nested!
-        { id: 'TXN-1', amount: 5000, description: 'Salary' },
-        { id: 'TXN-2', amount: -200, description: 'UPI' },
-      ]
+  ```jsx
+  // ❌ Denormalized (nested) - common mistake
+  const state = {
+    accounts: [
+      {
+        id: 'ACC-001',
+        name: 'Savings',
+        transactions: [                  // Nested!
+          { id: 'TXN-1', amount: 5000, description: 'Salary' },
+          { id: 'TXN-2', amount: -200, description: 'UPI' },
+        ]
+      },
+      {
+        id: 'ACC-002',
+        name: 'Current',
+        transactions: [
+          { id: 'TXN-3', amount: -1000, description: 'Rent' },
+        ]
+      }
+    ]
+  };
+  // Problem: To update TXN-2, you need to: find the account → find the transaction → update
+  // Very complex and error-prone!
+
+  // ✅ Normalized (flat) - like a database
+  const state = {
+    accounts: {
+      byId: {
+        'ACC-001': { id: 'ACC-001', name: 'Savings', transactionIds: ['TXN-1', 'TXN-2'] },
+        'ACC-002': { id: 'ACC-002', name: 'Current', transactionIds: ['TXN-3'] }
+      },
+      allIds: ['ACC-001', 'ACC-002']
     },
-    {
-      id: 'ACC-002',
-      name: 'Current',
-      transactions: [
-        { id: 'TXN-3', amount: -1000, description: 'Rent' },
-      ]
+    transactions: {
+      byId: {
+        'TXN-1': { id: 'TXN-1', amount: 5000, description: 'Salary', accountId: 'ACC-001' },
+        'TXN-2': { id: 'TXN-2', amount: -200, description: 'UPI', accountId: 'ACC-001' },
+        'TXN-3': { id: 'TXN-3', amount: -1000, description: 'Rent', accountId: 'ACC-002' }
+      },
+      allIds: ['TXN-1', 'TXN-2', 'TXN-3']
     }
-  ]
-};
-// Problem: To update TXN-2, you need to: find the account → find the transaction → update
-// Very complex and error-prone!
+  };
 
-// ✅ Normalized (flat) - like a database
-const state = {
-  accounts: {
-    byId: {
-      'ACC-001': { id: 'ACC-001', name: 'Savings', transactionIds: ['TXN-1', 'TXN-2'] },
-      'ACC-002': { id: 'ACC-002', name: 'Current', transactionIds: ['TXN-3'] }
-    },
-    allIds: ['ACC-001', 'ACC-002']
-  },
-  transactions: {
-    byId: {
-      'TXN-1': { id: 'TXN-1', amount: 5000, description: 'Salary', accountId: 'ACC-001' },
-      'TXN-2': { id: 'TXN-2', amount: -200, description: 'UPI', accountId: 'ACC-001' },
-      'TXN-3': { id: 'TXN-3', amount: -1000, description: 'Rent', accountId: 'ACC-002' }
-    },
-    allIds: ['TXN-1', 'TXN-2', 'TXN-3']
+  // Now updating TXN-2 is simple:
+  state.transactions.byId['TXN-2'].amount = -250;  // Direct access by ID!
+  ```
+
+  **RTK has `createEntityAdapter` to simplify this:**
+  ```jsx
+  import { createEntityAdapter, createSlice } from '@reduxjs/toolkit';
+
+  const transactionsAdapter = createEntityAdapter({
+    sortComparer: (a, b) => b.date.localeCompare(a.date)  // Newest first
+  });
+
+  const transactionsSlice = createSlice({
+    name: 'transactions',
+    initialState: transactionsAdapter.getInitialState(),
+    reducers: {
+      addTransaction: transactionsAdapter.addOne,
+      updateTransaction: transactionsAdapter.updateOne,
+      removeTransaction: transactionsAdapter.removeOne,
+      setAllTransactions: transactionsAdapter.setAll
+    }
+  });
+
+  // Auto-generated selectors
+  const { selectAll, selectById, selectIds } = transactionsAdapter.getSelectors(
+    state => state.transactions
+  );
+  ```
+
+  ---
+
+  ## Q38. How would you migrate from legacy Redux (connect/mapStateToProps) to Redux Toolkit?
+
+  **Answer:**
+
+  **Step-by-step migration (can be done incrementally):**
+
+  **Step 1: Replace `createStore` with `configureStore`**
+  ```jsx
+  // ❌ Old
+  import { createStore, applyMiddleware, combineReducers } from 'redux';
+  import thunk from 'redux-thunk';
+  const store = createStore(combineReducers({ auth, accounts }), applyMiddleware(thunk));
+
+  // ✅ New (drop-in replacement)
+  import { configureStore } from '@reduxjs/toolkit';
+  const store = configureStore({
+    reducer: { auth: authReducer, accounts: accountsReducer }
+    // Thunk middleware is included automatically!
+  });
+  ```
+
+  **Step 2: Replace `connect` with hooks (one component at a time)**
+  ```jsx
+  // ❌ Old (connect HOC)
+  class AccountBalance extends React.Component {
+    render() {
+      return <p>Balance: ₹{this.props.balance}</p>;
+    }
   }
-};
+  const mapStateToProps = (state) => ({ balance: state.accounts.balance });
+  const mapDispatchToProps = { deposit, withdraw };
+  export default connect(mapStateToProps, mapDispatchToProps)(AccountBalance);
 
-// Now updating TXN-2 is simple:
-state.transactions.byId['TXN-2'].amount = -250;  // Direct access by ID!
-```
+  // ✅ New (hooks)
+  function AccountBalance() {
+    const balance = useSelector(state => state.accounts.balance);
+    const dispatch = useDispatch();
 
-**RTK has `createEntityAdapter` to simplify this:**
-```jsx
-import { createEntityAdapter, createSlice } from '@reduxjs/toolkit';
+    return (
+      <div>
+        <p>Balance: ₹{balance}</p>
+        <button onClick={() => dispatch(deposit(5000))}>Deposit</button>
+      </div>
+    );
+  }
+  ```
 
-const transactionsAdapter = createEntityAdapter({
-  sortComparer: (a, b) => b.date.localeCompare(a.date)  // Newest first
-});
+  **Step 3: Replace reducers with `createSlice` (one slice at a time)**
 
-const transactionsSlice = createSlice({
-  name: 'transactions',
-  initialState: transactionsAdapter.getInitialState(),
-  reducers: {
-    addTransaction: transactionsAdapter.addOne,
-    updateTransaction: transactionsAdapter.updateOne,
-    removeTransaction: transactionsAdapter.removeOne,
-    setAllTransactions: transact
+  **Step 4: Replace manual thunks with `createAsyncThunk`**
+
+  **Key point:** This can be done gradually. Old Redux and new RTK work together in the same store.
+
+  ---
+
+  ## Q39. How do you handle side effects in Redux? Compare different approaches.
+
+  **Answer:**
+
+  | Approach | Best For | Complexity |
+  |---|---|---|
+  | **createAsyncThunk** | Simple API calls | Low |
+  | **Redux Thunk** | Custom async logic | Low |
+  | **Redux Saga** | Complex workflows, race conditions | High |
+  | **RTK Query** | Data fetching + caching | Low (RTK handles it) |
+  | **Redux Observable** | Stream-based / RxJS fans | High |
+
+  **1. createAsyncThunk (Recommended for most cases):**
+  ```jsx
+  const fetchAccountBalance = createAsyncThunk(
+    'account/fetchBalance',
+    async (accountId) => {
+      const response = await api.getBalance(accountId);
+      return response.data;
+    }
+  );
+  ```
+
+  **2. Redux Saga (Complex multi-step flow):**
+  ```jsx
+  function* loanApplicationSaga(action) {
+    try {
+      // Step 1: Validate user eligibility
+      const eligibility = yield call(api.checkEligibility, action.payload.userId);
+      if (!eligibility.eligible) {
+        yield put({ type: 'LOAN_REJECTED', reason: 'Not eligible' });
+        return;
+      }
+
+      // Step 2: Create application
+      const application = yield call(api.createLoanApp, action.payload);
+      yield put({ type: 'APPLICATION_CREATED', payload: application });
+
+      // Step 3: Wait for document upload OR timeout (race condition)
+      const { documents, timeout } = yield race({
+        documents: call(waitForDocumentUpload, application.id),
+        timeout: delay(300000)  // 5 minutes
+      });
+
+      if (timeout) {
+        yield put({ type: 'UPLOAD_TIMEOUT' });
+      } else {
+        yield put({ type: 'DOCUMENTS_RECEIVED', payload: documents });
+      }
+    } catch (error) {
+      yield put({ type: 'LOAN_ERROR', payload: error.message });
+    }
+  }
+  ```
+
+  **My recommendation:** Start with `createAsyncThunk` or `RTK Query`. Only reach for Saga when you have genuinely complex multi-step async flows that need cancellation or race handling.
+
+  ---
+
+  ## Q39b. How does RTK handle immutability internally? Explain `createReducer` and the Immer mechanism.
+
+  **Answer:**
+
+  ### The Problem RTK Solves
+
+  In classic Redux, you must return a **new state object** every time — never mutate the old one:
+
+  ```jsx
+  // ❌ Classic Redux — painful spread-copy at every level
+  function accountReducer(state = initialState, action) {
+    switch (action.type) {
+      case 'UPDATE_NAME':
+        return {
+          ...state,                          // copy level 1
+          user: {
+            ...state.user,                   // copy level 2
+            profile: {
+              ...state.user.profile,         // copy level 3
+              name: action.payload           // finally update
+            }
+          }
+        };
+    }
+  }
+  // 3 levels of spreading just to change one field!
+  ```
+
+  ### How Immer Works (The Magic Inside RTK)
+
+  RTK wraps every reducer with **Immer** — a library that lets you write code that **looks like mutation** but actually produces a **new immutable object**.
+
+  ```
+    What you WRITE:               What Immer DOES internally:
+    ┌─────────────────────┐       ┌─────────────────────────────────────┐
+    │ state.user.name =   │       │ 1. Creates a PROXY "draft" of state │
+    │   'Neelesh'         │  ──►  │ 2. Records your changes on the draft│
+    │                     │       │ 3. Produces a NEW object with changes│
+    │ (looks like mutation│       │ 4. Original state is UNTOUCHED      │
+    │  but it's NOT)      │       │ 5. Unchanged parts share references │
+    └─────────────────────┘       └─────────────────────────────────────┘
+  ```
+
+  **Step-by-step of what happens:**
+
+  ```jsx
+  const accountSlice = createSlice({
+    name: 'account',
+    initialState: { balance: 0, owner: 'Neelesh' },
+    reducers: {
+      deposit(state, action) {
+        state.balance += action.payload;  // ← looks like mutation
+      }
+    }
+  });
+
+  // When dispatch(deposit(5000)) runs:
+  // 1. Immer creates a Proxy draft of { balance: 0, owner: 'Neelesh' }
+  // 2. Your code runs: draft.balance += 5000 → draft is now { balance: 5000 }
+  // 3. Immer sees balance changed, owner didn't
+  // 4. Returns NEW object: { balance: 5000, owner: 'Neelesh' }
+  //    (owner is the SAME reference — structural sharing)
+  // 5. Old state { balance: 0 } is preserved (time-travel works!)
+  ```
+
+  ### `createReducer` — The Lower-Level API
+
+  `createSlice` uses `createReducer` internally. You use `createReducer` directly when you need to handle actions that come from **outside** your slice (like Saga actions, shared actions, or third-party libraries):
+
+  ```jsx
+  import { createReducer, createAction } from '@reduxjs/toolkit';
+
+  // Actions defined somewhere else (maybe Saga dispatches these)
+  const fetchUsersSuccess = createAction('saga/fetchUsersSuccess');
+  const resetAll = createAction('app/resetAll');
+
+  const initialState = { list: [], loading: false };
+
+  const usersReducer = createReducer(initialState, (builder) => {
+    builder
+      .addCase(fetchUsersSuccess, (state, action) => {
+        state.list = action.payload;    // ✅ Immer draft — safe "mutation"
+        state.loading = false;
+      })
+      .addCase(resetAll, () => {
+        return initialState;            // ✅ Return entirely new state
+      });
+  });
+  ```
+
+  **When to use `createReducer` vs `createSlice`:**
+
+  | Use `createSlice` | Use `createReducer` |
+  |---|---|
+  | Normal feature state (default) | Handling actions from outside (Saga, shared actions) |
+  | Generates actions automatically | You define actions separately |
+  | 95% of the time | Rare, advanced cases |
+
+  **Interview line:** "RTK uses Immer under the hood. Immer creates a Proxy draft of your state — you 'mutate' the draft, and Immer produces a brand-new immutable object. This gives us the safety of immutability with the simplicity of direct assignment."
+
+  ---
+
+  ## Q39c. Redux Saga Deep Dive — watcher/worker pattern, polling, retry, and real-world examples.
+
+  **Answer:**
+
+  ### What is Saga in Simple Terms?
+
+  Redux Saga is a middleware that intercepts actions using **generator functions** (functions that can pause and resume). Think of it like a background worker that listens for specific actions and runs complex workflows.
+
+  ```
+    Normal Thunk:                    Saga:
+    ┌──────────────────┐            ┌──────────────────────────┐
+    │ "Do this one     │            │ "Keep watching for events │
+    │  thing and come  │            │  and run workflows when  │
+    │  back"           │            │  they happen — forever"  │
+    └──────────────────┘            └──────────────────────────┘
+    Like a one-time errand           Like a dedicated assistant
+  ```
+
+  ### The Watcher/Worker Pattern (Core of Saga)
+
+  ```
+    ┌──────────────────────────────────────────────┐
+    │  WATCHER SAGA (always listening)             │
+    │                                              │
+    │  "When FETCH_USERS action arrives,           │
+    │   run the fetchUsersSaga worker."            │
+    │                                              │
+    │  function* usersWatcher() {                  │
+    │    yield takeLatest('FETCH_USERS',           │
+    │                      fetchUsersSaga);        │
+    │  }                                           │
+    └──────────────────────────┬───────────────────┘
+                              │ triggers
+                              ▼
+    ┌──────────────────────────────────────────────┐
+    │  WORKER SAGA (does the actual work)          │
+    │                                              │
+    │  function* fetchUsersSaga(action) {          │
+    │    const users = yield call(api.getUsers);   │
+    │    yield put(fetchSuccess(users));           │
+    │  }                                           │
+    └──────────────────────────────────────────────┘
+  ```
+
+  **Key Saga commands explained in plain English:**
+
+  | Command | What It Does | Plain English |
+  |---|---|---|
+  | `call(fn, args)` | Calls a function and waits for result | "Go do this task and come back" |
+  | `put(action)` | Dispatches an action to the store | "Tell Redux this happened" |
+  | `takeLatest(type, saga)` | Run saga on action, cancel previous if still running | "Only care about the latest request" |
+  | `takeEvery(type, saga)` | Run saga on every action (don't cancel) | "Handle all of them" |
+  | `race({...})` | Run multiple tasks, first to finish wins | "Whoever finishes first — go with that" |
+  | `delay(ms)` | Wait for a duration | "Pause for this long" |
+  | `select(selector)` | Read from Redux store | "What's the current state?" |
+
+  ### Real Example 1: Fetch with retry (banking API)
+
+  ```jsx
+  import { call, put, delay, takeLatest } from 'redux-saga/effects';
+
+  function* fetchAccountBalanceSaga(action) {
+    const maxRetries = 3;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        yield put({ type: 'balance/loading' });
+        
+        const balance = yield call(api.getBalance, action.payload.accountId);
+        // call = "go fetch the balance and wait for the response"
+        
+        yield put({ type: 'balance/success', payload: balance });
+        // put = "tell Redux the balance arrived"
+        
+        return; // Success — exit the retry loop
+      } catch (error) {
+        if (attempt < maxRetries) {
+          yield delay(attempt * 1000); // Wait 1s, 2s, 3s (increasing delay)
+          // delay = "pause and wait before trying again"
+        } else {
+          yield put({ type: 'balance/failed', payload: error.message });
+          // All retries exhausted — tell Redux it failed
+        }
+      }
+    }
+  }
+
+  function* watchBalanceFetch() {
+    yield takeLatest('balance/fetch', fetchAccountBalanceSaga);
+    // takeLatest = "if user clicks 'Refresh' 5 times quickly,
+    //               cancel the first 4 and only run the latest one"
+  }
+  ```
+
+  ### Real Example 2: Polling (live price updates)
+
+  ```jsx
+  function* pollLivePricesSaga() {
+    while (true) {                      // Runs forever (while component is active)
+      try {
+        const prices = yield call(api.getLivePrices);
+        yield put({ type: 'prices/updated', payload: prices });
+      } catch (error) {
+        yield put({ type: 'prices/error', payload: error.message });
+      }
+      yield delay(5000);                // Wait 5 seconds, then repeat
+    }
+  }
+
+  // Start polling when user enters dashboard, stop when they leave
+  function* watchPricing() {
+    while (true) {
+      yield take('dashboard/entered');         // Wait for user to enter page
+      const pollTask = yield fork(pollLivePricesSaga);  // Start polling (background)
+      
+      yield take('dashboard/left');            // Wait for user to leave page
+      yield cancel(pollTask);                  // Stop polling (clean up)
+    }
+  }
+  ```
+
+  ### Real Example 3: Race condition (timeout vs API)
+
+  ```jsx
+  function* transferWithTimeoutSaga(action) {
+    const { result, timeout } = yield race({
+      result: call(api.transfer, action.payload),  // Try to transfer
+      timeout: delay(30000)                         // 30-second timeout
+    });
+    // race = "whichever finishes first, go with that — cancel the other"
+
+    if (timeout) {
+      yield put({ type: 'transfer/timeout', 
+        payload: 'Transfer timed out. Please check your bank statement.' });
+    } else {
+      yield put({ type: 'transfer/success', payload: result });
+    }
+  }
+  ```
+
+  **When Thunk is enough vs when you need Saga:**
+
+  | Scenario | Use Thunk | Use Saga |
+  |---|---|---|
+  | Simple API call (fetch users) | ✅ | Overkill |
+  | API call with retry | ✅ (with loop) | ✅ (cleaner) |
+  | Polling live data | ❌ (messy) | ✅ |
+  | Cancel in-flight request | ❌ | ✅ (`cancel`) |
+  | Multi-step workflow (loan app) | ❌ | ✅ |
+  | Background sync | ❌ | ✅ (`fork`/`cancel`) |
+
+  **Interview line:** "I prefer createAsyncThunk for 90% of async flows. Saga earns its complexity when I need polling, cancellation, retries with backoff, or multi-step orchestrated workflows — like a loan application pipeline."
+
+  ---
+
+  
+  ## Q39d. RTK Query Deep Dive — middleware explained, caching mechanics, deduplication, polling lifecycle, and normalization choice.
+
+  **Answer:**
+
+  ### RTK Query Mental Model
+
+  RTK Query is a **cache-first data fetching system** built into Redux. It handles everything you'd normally build manually: fetching, caching, loading states, error states, refetching, and cache invalidation.
+
+  ```
+    WITHOUT RTK Query (manual Redux):    WITH RTK Query:
+    ┌────────────────────────────┐       ┌────────────────────────────┐
+    │ Write createAsyncThunk     │       │ Define endpoint             │
+    │ Write pending/fulfilled/   │       │ Use auto-generated hook     │
+    │   rejected reducers        │       │ DONE ✅                     │
+    │ Write loading state logic  │       │                             │
+    │ Write error state logic    │       │ RTK Query handles:          │
+    │ Write caching manually     │       │ • loading/error states      │
+    │ Write invalidation logic   │       │ • caching                   │
+    │ Write deduplication        │       │ • deduplication             │
+    │ TOO MUCH CODE ❌            │       │ • invalidation              │
+    └────────────────────────────┘       └────────────────────────────┘
+  ```
+
+  ### The Middleware Line Explained
+
+  ```jsx
+  const store = configureStore({
+    reducer: {
+      [apiSlice.reducerPath]: apiSlice.reducer,  // RTK Query's own reducer
+    },
+    middleware: (getDefaultMiddleware) =>
+      getDefaultMiddleware().concat(apiSlice.middleware),
+    //  ↑ what is this?  ↑ what is this?     ↑ what is this?
+  });
+  ```
+
+  Let's break each part:
+
+  ```
+    getDefaultMiddleware()
+    │
+    │  Returns an array of middlewares that RTK includes by default:
+    │  • Redux Thunk (for async dispatches)
+    │  • Immutability check (warns if you mutate state accidentally)
+    │  • Serializable check (warns if state contains non-serializable values)
+    │
+    .concat(apiSlice.middleware)
+    │
+    │  Adds RTK Query's OWN middleware that handles:
+    │  • Cache lifecycle (when to fetch, when to serve from cache)
+    │  • Polling timers (start/stop based on component mount)
+    │  • Subscription tracking (which components are watching which data)
+    │  • Automatic refetching (when tags are invalidated)
+    │
+    │  WITHOUT THIS LINE → RTK Query will NOT work
+    │  (data won't cache, polling won't run, invalidation won't trigger)
+  ```
+
+  ### Endpoint Definition Explained
+
+  ```jsx
+  endpoints: (builder) => ({
+    // QUERY = reading data (GET request)
+    getUsers: builder.query({
+      //                ↑ "this endpoint READS data"
+      query: () => '/users',
+      //    ↑ "the URL to call"
+      providesTags: ['User'],
+      //    ↑ "this data is labeled 'User' in the cache
+      //       so when something invalidates 'User',
+      //       this query will refetch"
+    }),
+
+    // MUTATION = changing data (POST/PUT/DELETE request)
+    addUser: builder.mutation({
+      //                  ↑ "this endpoint CHANGES data"
+      query: (body) => ({
+        url: '/users',
+        method: 'POST',
+        body
+      }),
+      invalidatesTags: ['User'],
+      //    ↑ "after this mutation succeeds,
+      //       any query labeled 'User' is now STALE
+      //       → RTK Query will automatically refetch it"
+    }),
+  })
+  ```
+
+  ```
+    How tags connect queries and mutations:
+
+    getUsers ──── providesTags: ['User'] ──── "I provide User data"
+                          │
+                          │  (connected by tag name)
+                          │
+    addUser ──── invalidatesTags: ['User'] ──── "I changed User data"
+                          │
+                          ▼
+                RTK Query says:
+                "User data is stale → refetch getUsers automatically"
+  ```
+
+  ### Caching — Real-World Scenario (Banking Dashboard)
+
+  Imagine a banking app where multiple screens show account data:
+
+  ```
+    Step 1: User opens Account List page
+    ┌──────────────────────────────────────────┐
+    │  useGetAccountsQuery()                   │
+    │  → Cache is EMPTY → API call made        │
+    │  → Data arrives → stored in cache        │
+    │  → Component shows accounts ✅           │
+    └──────────────────────────────────────────┘
+
+    Step 2: User navigates to Transfer page (SAME query)
+    ┌──────────────────────────────────────────┐
+    │  useGetAccountsQuery()                   │
+    │  → Cache EXISTS for this query+args      │
+    │  → NO API call ❌                         │
+    │  → Serves cached data INSTANTLY ✅       │
+    └──────────────────────────────────────────┘
+
+    Step 3: User makes a transfer (mutation)
+    ┌──────────────────────────────────────────┐
+    │  useTransferMoneyMutation()              │
+    │  → invalidatesTags: ['Account']          │
+    │  → RTK Query marks Account cache STALE   │
+    │  → Refetches getAccounts automatically   │
+    │  → Both Account List and Transfer page   │
+    │    see updated balances ✅               │
+    └──────────────────────────────────────────┘
+  ```
+
+  **Cache key** = endpoint name + arguments. So `getAccounts()` and `getAccounts('savings')` are **different** cache entries.
+
+  ### Deduplication — What Happens When Backend Changes Data
+
+  Your question: *"If backend adds/removes movies and we're showing cached data — won't UI be stale?"*
+
+  **Answer: YES — and that's intentional.** You control freshness with these strategies:
+
+  ```
+    Strategy 1: TAG INVALIDATION (most common)
+    ┌─────────────────────────────────────────────────┐
+    │ When YOUR app adds a movie:                     │
+    │   addMovie mutation → invalidatesTags: ['Movie']│
+    │   → getMovies refetches automatically           │
+    │                                                 │
+    │ This handles changes YOUR app makes ✅          │
+    └─────────────────────────────────────────────────┘
+
+    Strategy 2: POLLING (for external changes)
+    ┌─────────────────────────────────────────────────┐
+    │ When ANOTHER system changes movies:             │
+    │   useGetMoviesQuery(undefined, {                │
+    │     pollingInterval: 30000  // check every 30s  │
+    │   })                                            │
+    │                                                 │
+    │ This handles changes from OUTSIDE your app ✅   │
+    └─────────────────────────────────────────────────┘
+
+    Strategy 3: REFETCH ON FOCUS
+    ┌─────────────────────────────────────────────────┐
+    │ When user switches browser tab and comes back:  │
+    │   setupListeners(store.dispatch)                │
+    │   // in store setup                             │
+    │                                                 │
+    │   useGetMoviesQuery(undefined, {                │
+    │     refetchOnFocus: true                        │
+    │   })                                            │
+    │                                                 │
+    │ Refetches when user returns to tab ✅           │
+    └─────────────────────────────────────────────────┘
+  ```
+
+  **Deduplication** means: if `<MovieList />` and `<MovieStats />` both call `useGetMoviesQuery()` with the same arguments, RTK Query makes **ONE** API call and shares the cached result with both components.
+
+  ### Polling Lifecycle — What Happens on Unmount?
+
+  ```
+    Component MOUNTS with pollingInterval: 10000
+    ┌─────────────────────────────────────────────────┐
+    │  Subscription created → RTK Query starts timer  │
+    │  Every 10s → API call → cache updated           │
+    └─────────────────────────────────────────────────┘
+                │
+                │  User navigates away
+                ▼
+    Component UNMOUNTS
+    ┌─────────────────────────────────────────────────┐
+    │  Subscription removed                           │
+    │  RTK Query checks: any other subscribers?       │
+    │  NO → stops polling timer ✅                    │
+    │  (no wasted API calls, no memory leaks)         │
+    │                                                 │
+    │  YES (another component still subscribed)       │
+    │  → polling continues for that subscriber        │
+    └─────────────────────────────────────────────────┘
+  ```
+
+  RTK Query uses **reference counting** — it tracks how many components are subscribed. When the count drops to zero, it stops polling and (after a configurable timeout) cleans up the cache entry.
+
+  ### Normalization: RTK Query vs Normal RTK
+
+  | Approach | Use When |
+  |---|---|
+  | **RTK Query** (server state) | Data comes from API, needs caching, refetching, invalidation |
+  | **Normal RTK + createEntityAdapter** (client state) | Data managed locally, manual control needed, offline-first |
+
+  ```jsx
+  // RTK Query — handles normalization automatically via cache
+  // You just use the data as-is from the hook:
+  const { data: users } = useGetUsersQuery();
+  // users = [{ id: 1, name: 'Neelesh' }, { id: 2, name: 'Varad' }]
+
+  // Normal RTK — you normalize manually when you need fast lookups:
+  const usersAdapter = createEntityAdapter();
+  // State shape: { ids: [1, 2], entities: { 1: {...}, 2: {...} } }
+  // Use when you need: updateOne, removeOne, upsertMany by ID
+  ```
+
+  **Interview line:** "RTK Query owns server state end-to-end — caching, deduplication, invalidation, and polling. The middleware line enables this lifecycle management. Without it, none of the automatic behavior works."
+
+  ---
+
+  ## Q39e. What does "server state without caching strategy" mean? Why is manual Redux bad for API data?
+
+  **Answer:**
+
+  ### The Anti-Pattern (What Most Teams Did Before RTK Query)
+
+  ```jsx
+  // ❌ Manual Redux for API data — the old way
+  // Step 1: Write thunk
+  const fetchMovies = createAsyncThunk('movies/fetch', async () => {
+    const res = await fetch('/api/movies');
+    return res.json();
+  });
+
+  // Step 2: Write reducer with loading/error/data
+  const moviesSlice = createSlice({
+    name: 'movies',
+    initialState: { list: [], loading: false, error: null },
+    extraReducers: (builder) => {
+      builder
+        .addCase(fetchMovies.pending, (state) => { state.loading = true; })
+        .addCase(fetchMovies.fulfilled, (state, action) => {
+          state.loading = false;
+          state.list = action.payload;
+        })
+        .addCase(fetchMovies.rejected, (state, action) => {
+          state.loading = false;
+          state.error = action.error.message;
+        });
+    }
+  });
+
+  // Step 3: Dispatch on every page load
+  useEffect(() => {
+    dispatch(fetchMovies());
+  }, []);
+  ```
+
+  **What's wrong with this?**
+
+  ```
+    Problem 1: NO CACHING
+    User visits /movies → API call
+    User goes to /profile → comes back to /movies → API call AGAIN
+    Same data, wasted network call ❌
+
+    Problem 2: NO DEDUPLICATION
+    <MovieList /> dispatches fetchMovies()
+    <MovieStats /> also dispatches fetchMovies()
+    TWO API calls for the same data ❌
+
+    Problem 3: NO AUTOMATIC INVALIDATION
+    User adds a movie → list is stale
+    You must manually dispatch(fetchMovies()) everywhere
+    Miss one place → UI shows old data ❌
+
+    Problem 4: RACE CONDITIONS
+    User clicks "Refresh" twice quickly
+    Two API calls in flight — which one wins?
+    Depends on network timing → unpredictable ❌
+  ```
+
+  ### The Solution — RTK Query
+
+  ```jsx
+  // ✅ RTK Query — same functionality, zero manual state management
+  const moviesApi = createApi({
+    baseQuery: fetchBaseQuery({ baseUrl: '/api' }),
+    tagTypes: ['Movie'],
+    endpoints: (builder) => ({
+      getMovies: builder.query({
+        query: () => '/movies',
+        providesTags: ['Movie'],
+      }),
+      addMovie: builder.mutation({
+        query: (movie) => ({ url: '/movies', method: 'POST', body: movie }),
+        invalidatesTags: ['Movie'],  // Auto-refetches movie list
+      }),
+    }),
+  });
+
+  // In component — just one line:
+  const { data: movies, isLoading } = useGetMoviesQuery();
+  // ✅ Caches automatically
+  // ✅ Deduplicates if two components use the same query
+  // ✅ Invalidates when addMovie mutation runs
+  // ✅ No race conditions (RTK Query handles it)
+  ```
+
+  **Side-by-side comparison:**
+
+  | What You Need | Manual Redux | RTK Query |
+  |---|---|---|
+  | Loading state | Write reducer for pending | `isLoading` — automatic |
+  | Error state | Write reducer for rejected | `error` — automatic |
+  | Caching | Build your own cache logic | Built-in by default |
+  | Deduplication | Not handled | Automatic (same cache key) |
+  | Invalidation after mutation | Manual dispatch everywhere | Tag-based, automatic |
+  | Polling | Write setInterval + cleanup | `pollingInterval` option |
+  | Lines of code | ~50-80 per endpoint | ~10 per endpoint |
+
+  **Interview line:** "Server state without a caching strategy means you're re-fetching data you already have, handling race conditions manually, and writing reducers for every API endpoint. RTK Query eliminates all of this. I use Redux for client domain state and RTK Query for server state."
+
+  ---
+
+  ## Q39f. Redux Interview Q&A Script, Master Diagram, and Trick Questions.
+
+  **Answer:**
+
+  ### Part 1: Interview Q&A Script (Spoken Format — 30-Second Answers)
+
+  **Q: "Explain Redux in one line."**
+  > "Redux is a predictable state container that manages shared, long-lived application state using explicit, unidirectional data flow — so every state change is traceable and debuggable."
+
+  **Q: "What is explicit data flow?"**
+  > "It means data movement is clearly stated, visible, and directly traceable. In Redux: UI dispatches an action → reducer computes new state → store updates → components re-render via selectors. No hidden mutations, no magic — every change has a paper trail."
+
+  **Q: "Why not just use Context for everything?"**
+  > "Context is for distribution, not state management at scale. It re-renders ALL consumers on any value change, has no DevTools, no middleware, and no built-in performance optimization. Redux only re-renders components whose selected slice actually changed."
+
+  **Q: "When would you NOT use Redux?"**
+  > "For local UI state like modal open/close, form inputs, or toggle states — that stays in useState. For server state — fetching and caching API data — I use RTK Query, not manual Redux. Redux is for shared, cross-component domain state."
+
+  **Q: "How do you handle async in Redux?"**
+  > "For simple API calls, createAsyncThunk with pending/fulfilled/rejected lifecycle. For server state with caching, RTK Query. For complex orchestration like polling, retries, or cancellation — Redux Saga."
+
+  **Q: "What's the difference between createSlice and createReducer?"**
+  > "createSlice generates actions AND reducer together — it's what I use 95% of the time. createReducer is the lower-level API that createSlice uses internally. I use it when I need to handle actions coming from outside my slice, like Saga-dispatched actions."
+
+  ### Part 2: Master Diagram — How All Redux Pieces Connect
+
+  ```
+    ┌─────────────────────────────────────────────────────────────────────┐
+    │                         REACT COMPONENT                            │
+    │                                                                     │
+    │   useSelector(selector)          dispatch(action)                   │
+    │   useGetUsersQuery()             useAddUserMutation()               │
+    │         │                              │                            │
+    └─────────┼──────────────────────────────┼────────────────────────────┘
+              │ reads                        │ writes
+              │                              ▼
+    ┌─────────┼────────────────────────────────────────────────────────────┐
+    │         │              MIDDLEWARE LAYER                              │
+    │         │    ┌──────────────┬──────────────┬──────────────┐         │
+    │         │    │  Redux Thunk │  Saga        │  RTK Query   │         │
+    │         │    │  (simple     │  (complex    │  Middleware   │         │
+    │         │    │   async)     │   workflows) │  (cache,     │         │
+    │         │    │              │              │   polling,    │         │
+    │         │    │              │              │   refetch)    │         │
+    │         │    └──────┬───────┴──────┬───────┴──────┬───────┘         │
+    │         │           │              │              │                  │
+    └─────────┼───────────┼──────────────┼──────────────┼─────────────────┘
+              │           │              │              │
+              │           ▼              ▼              ▼
+    ┌─────────┼────────────────────────────────────────────────────────────┐
+    │         │                    REDUCERS                                │
+    │         │    ┌──────────────┬──────────────┬──────────────┐         │
+    │         │    │  authSlice   │  usersSlice  │  RTK Query   │         │
+    │         │    │  (createSlice│  (createSlice│  reducer     │         │
+    │         │    │   + Immer)   │   + Immer)   │  (auto-      │         │
+    │         │    │              │              │   managed)    │         │
+    │         │    └──────┬───────┴──────┬───────┴──────┬───────┘         │
+    │         │           │              │              │                  │
+    └─────────┼───────────┼──────────────┼──────────────┼─────────────────┘
+              │           │              │              │
+              │           ▼              ▼              ▼
+    ┌─────────┼────────────────────────────────────────────────────────────┐
+    │         │                  REDUX STORE                               │
+    │         │                                                            │
+    │         │    { auth: {...}, users: {...}, api: {...} }               │
+    │         │                                                            │
+    │         │    Single source of truth                                  │
+    │         │    Immutable (Immer enforces)                              │
+    │         │    Observable (DevTools, time-travel)                      │
+    │         │                                                            │
+    │         └──────── reads via selectors ──────────────────────────────│
+    └──────────────────────────────────────────────────────────────────────┘
+  ```
+
+  **State ownership map — what tool for what state:**
+
+  ```
+    ┌─────────────────────────────────────────────────────────────┐
+    │                     STATE OWNERSHIP MAP                     │
+    │                                                             │
+    │  LOCAL STATE (useState)        GLOBAL STATE (Redux Store)   │
+    │  ┌──────────────────────┐      ┌──────────────────────────┐│
+    │  │ Modal open/close     │      │ User session / auth      ││
+    │  │ Form typing state    │      │ Permissions / RBAC       ││
+    │  │ Hover / focus        │      │ App configuration        ││
+    │  │ Tab selection        │      │ Cross-component domain   ││
+    │  │ Accordion expand     │      │ state (accounts, cart)   ││
+    │  └──────────────────────┘      └──────────────────────────┘│
+    │                                                             │
+    │  CONTEXT (React)               SERVER STATE (RTK Query)    │
+    │  ┌──────────────────────┐      ┌──────────────────────────┐│
+    │  │ Theme (light/dark)   │      │ Fetched users list       ││
+    │  │ Locale / i18n        │      │ Transaction history      ││
+    │  │ Feature flags        │      │ Account balances         ││
+    │  │ Auth token (read)    │      │ Search results           ││
+    │  └──────────────────────┘      └──────────────────────────┘│
+    └─────────────────────────────────────────────────────────────┘
+  ```
+
+  ### Part 3: Common Trick Questions & Answers
+
+  **Trick 1: "Is Redux synchronous or asynchronous?"**
+  > ✅ "Redux itself is **synchronous** — dispatching an action runs the reducer and updates the store immediately. Async behavior comes from middleware (Thunk, Saga) that intercepts actions before they reach the reducer."
+
+  **Trick 2: "Can you mutate state in Redux?"**
+  > ✅ "Not directly. But with RTK's Immer integration, you can write code that **looks** like mutation inside createSlice reducers. Immer converts it into an immutable update using Proxy drafts. If you mutate state outside Immer (in classic Redux), React won't detect the change and won't re-render."
+
+  **Trick 3: "What happens if two components dispatch different actions simultaneously?"**
+  > ✅ "Redux processes them **sequentially**, not in parallel. Each dispatch runs through the full cycle: middleware → reducer → store update. React 18 may **batch** the resulting re-renders, but the state transitions are always sequential and predictable."
+
+  **Trick 4: "Why can't reducers have side effects?"**
+  > ✅ "Because reducers must be pure functions — same inputs always produce same outputs. This enables time-travel debugging (replay any action), testing (no mocks needed), and predictability. Side effects belong in middleware (Thunk, Saga) or RTK Query."
+
+  **Trick 5: "Does useSelector cause a re-render on every Redux state change?"**
+  > ✅ "No. `useSelector` runs the selector on every store change, but only triggers a re-render if the **selected value** has a different reference (`===` comparison). That's why memoized selectors from Reselect are important — they maintain the same reference when inputs haven't changed."
+
+  **Trick 6: "What's the difference between `extraReducers` and `reducers` in createSlice?"**
+  > ✅ "`reducers` defines actions **owned by this slice** — createSlice auto-generates action creators for them. `extraReducers` handles actions **from outside** — like createAsyncThunk lifecycle actions, actions from other slices, or Saga-dispatched actions. No action creators are auto-generated for extraReducers."
+
+  **Trick 7: "Is RTK Query replacing Redux?"**
+  > ✅ "No. RTK Query replaces the **manual Redux pattern for server state** (fetch + reducer + loading + error). Client domain state (auth, UI, business logic) still belongs in Redux slices. They coexist in the same store."
+
+  **Trick 8: "Why is normalized state important?"**
+  > ✅ "Normalized state stores entities by ID (like a database). This means: updating one entity is O(1) instead of searching arrays, no duplicate data across slices, and selectors are faster. RTK's `createEntityAdapter` provides this pattern out of the box."
+
+  ### The 16-Year Experience Closing Statement
+
+  > "Over the years, I've evolved from writing verbose Redux with switch-case reducers to using RTK's createSlice with Immer drafts, from manual API thunks to RTK Query's cache-first approach, and from putting everything in Redux to a deliberate state architecture — local state in React, cross-cutting config in Context, server state in RTK Query, and only shared domain state in Redux. The most expensive Redux mistake isn't choosing the wrong tool — it's Redux being used where it's not needed."
+
+  ---
+
+  ## Q39g. Complete Production Code: RTK (configureStore + createSlice + createAsyncThunk) + Axios + Interceptors + HTTPOnly Cookie Auth
+
+  **Answer:**
+
+  This example uses **traditional RTK** (NOT RTK Query) with Axios interceptors and **HTTPOnly cookies** for secure token management — the pattern used in real banking apps where tokens must never be accessible to JavaScript.
+
+  ### Why HTTPOnly Cookies Instead of localStorage?
+
+  ```
+    localStorage (INSECURE for banking):     HTTPOnly Cookie (SECURE):
+    ┌──────────────────────────────┐         ┌──────────────────────────────┐
+    │ Token stored in JS memory    │         │ Token stored in cookie       │
+    │ ❌ XSS attack can steal it   │         │ ✅ JavaScript CANNOT read it  │
+    │ ❌ Any script can access it   │         │ ✅ Browser sends it auto      │
+    │ ❌ Must manually add to       │         │ ✅ Server sets & reads it     │
+    │    every request header      │         │ ✅ Immune to XSS theft        │
+    └──────────────────────────────┘         └──────────────────────────────┘
+
+    How HTTPOnly cookie works:
+    ┌────────────────────────────────────────────────────────┐
+    │  1. User logs in → Server returns:                     │
+    │     Set-Cookie: accessToken=abc123; HTTPOnly; Secure   │
+    │                                                        │
+    │  2. Browser stores the cookie automatically            │
+    │     JavaScript CANNOT access it (document.cookie = ❌)  │
+    │                                                        │
+    │  3. Every API call → Browser attaches cookie auto      │
+    │     (with credentials: 'include' / withCredentials)    │
+    │                                                        │
+    │  4. Server reads cookie → validates token              │
+    │     Frontend never sees or handles the token!          │
+    └────────────────────────────────────────────────────────┘
+  ```
+
+  ### Architecture Overview
+
+  ```
+  ┌──────────────────────────────────────────────────────────────┐
+  │  Component                                                    │
+  │  useSelector(selectAccounts)     dispatch(fetchAccounts())   │
+  │  useSelector(selectAuthUser)     dispatch(loginUser(creds))  │
+  │          │                              │                    │
+  │          ▼                              ▼                    │
+  │  ┌─ Redux Store (configureStore) ────────────────────────┐   │
+  │  │                                                        │   │
+  │  │  ┌─ authSlice ──────┐  ┌─ accountsSlice ───────────┐  │   │
+  │  │  │ user, isLoggedIn  │  │ list, loading, error       │  │   │
+  │  │  │ loginUser thunk   │  │ fetchAccounts thunk        │  │   │
+  │  │  │ logoutUser thunk  │  │ initiateTransfer thunk     │  │   │
+  │  │  └──────┬────────────┘  └──────────┬────────────────┘  │   │
+  │  │         │                          │                    │   │
+  │  │         ▼                          ▼                    │   │
+  │  │  ┌─ Axios Instance (api/client.js) ──────────────────┐  │   │
+  │  │  │  withCredentials: true (sends HTTPOnly cookie)     │  │   │
+  │  │  │  Request Interceptor: adds CSRF token              │  │   │
+  │  │  │  Response Interceptor: 401 → refresh → retry       │  │   │
+  │  │  └────────────────────────────────────────────────────┘  │   │
+  │  └──────────────────────────────────────────────────────────┘   │
+  └──────────────────────────────────────────────────────────────────┘
+  ```
+
+  ### File 1: `api/client.js` — Axios Instance with HTTPOnly Cookie Support
+
+  ```jsx
+  // api/client.js
+  import axios from 'axios';
+
+  // ─── Step 1: Create Axios instance with cookie support ───
+  const axiosClient = axios.create({
+    baseURL: process.env.REACT_APP_API_URL || 'https://api.bank.com/v1',
+    timeout: 30000,
+    withCredentials: true,    // ← THIS IS THE KEY LINE
+    //                             Tells browser: "Send HTTPOnly cookies with every request"
+    //                             Without this: cookies won't be sent → 401 on every call
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+
+  // ─── Step 2: Request Interceptor — add CSRF token (not auth token!) ───
+  // With HTTPOnly cookies, you DON'T add Authorization header
+  // Instead, add CSRF token to prevent cross-site forgery
+  axiosClient.interceptors.request.use(
+    (config) => {
+      // CSRF token is stored in a regular (non-HTTPOnly) cookie by the server
+      // This one IS readable by JavaScript — it's not sensitive
+      const csrfToken = getCookie('XSRF-TOKEN');
+      if (csrfToken) {
+        config.headers['X-XSRF-TOKEN'] = csrfToken;
+      }
+      // NOTE: We do NOT set Authorization header!
+      // The browser sends the HTTPOnly cookie automatically
+      return config;
+    },
+    (error) => Promise.reject(error)
+  );
+
+  // Helper to read non-HTTPOnly cookies
+  function getCookie(name) {
+    const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+    return match ? match[2] : null;
+  }
+
+  // ─── Step 3: Response Interceptor — auto-refresh on 401 ───
+  let isRefreshing = false;
+  let failedQueue = [];
+
+  function processQueue(error, success) {
+    failedQueue.forEach(({ resolve, reject }) => {
+      if (error) reject(error);
+      else resolve(success);
+    });
+    failedQueue = [];
+  }
+
+  axiosClient.interceptors.response.use(
+    (response) => response,    // 2xx → pass through
+    async (error) => {
+      const originalRequest = error.config;
+
+      // If 401 (token expired) and haven't retried yet
+      if (error.response?.status === 401 && !originalRequest._retry) {
+
+        // If another request is already refreshing, queue this one
+        if (isRefreshing) {
+          return new Promise((resolve, reject) => {
+            failedQueue.push({ resolve, reject });
+          }).then(() => axiosClient(originalRequest));
+          //       ↑ retry original request after refresh completes
+        }
+
+        originalRequest._retry = true;
+        isRefreshing = true;
+
+        try {
+          // Call refresh endpoint — server reads HTTPOnly refreshToken cookie
+          // and sets a NEW HTTPOnly accessToken cookie in the response
+          await axios.post(
+            `${axiosClient.defaults.baseURL}/auth/refresh`,
+            {},                          // no body needed
+            { withCredentials: true }    // ← send HTTPOnly refreshToken cookie
+          );
+          // ↑ Server does:
+          //   1. Reads refreshToken from HTTPOnly cookie
+          //   2. Validates it
+          //   3. Sets new accessToken in HTTPOnly cookie (Set-Cookie header)
+          //   4. Returns 200
+
+          processQueue(null, true);
+
+          // Retry original request — browser will now send the NEW cookie
+          return axiosClient(originalRequest);
+        } catch (refreshError) {
+          processQueue(refreshError, null);
+          // Refresh failed → session expired → redirect to login
+          window.location.href = '/login';
+          return Promise.reject(refreshError);
+        } finally {
+          isRefreshing = false;
+        }
+      }
+
+      return Promise.reject(error);
+    }
+  );
+
+  export default axiosClient;
+  ```
+
+  **Key difference from localStorage approach:**
+
+  ```
+    localStorage approach:                   HTTPOnly cookie approach:
+    ┌─────────────────────────────┐          ┌─────────────────────────────┐
+    │ const token = localStorage   │          │ // NO token handling in JS!  │
+    │   .getItem('accessToken');   │          │ // Browser sends cookie auto │
+    │ config.headers.Authorization │          │ config.withCredentials = true│
+    │  = `Bearer ${token}`;       │          │ // That's it!                │
+    │                              │          │                              │
+    │ On refresh: save new token   │          │ On refresh: server sets new  │
+    │ localStorage.setItem(...)    │          │ cookie via Set-Cookie header │
+    │                              │          │ Frontend does NOTHING        │
+    └─────────────────────────────┘          └─────────────────────────────┘
+  ```
+
+  ### File 2: `store/slices/authSlice.js` — Auth State with createSlice + createAsyncThunk
+
+  ```jsx
+  // store/slices/authSlice.js
+  import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+  import axiosClient from '../../api/client';
+
+  // ─── Async Thunks ───
+
+  export const loginUser = createAsyncThunk(
+    'auth/login',
+    async (credentials, { rejectWithValue }) => {
+      try {
+        // Server validates credentials and sets HTTPOnly cookies:
+        //   Set-Cookie: accessToken=...; HTTPOnly; Secure; SameSite=Strict
+        //   Set-Cookie: refreshToken=...; HTTPOnly; Secure; SameSite=Strict; Path=/auth/refresh
+        const response = await axiosClient.post('/auth/login', credentials);
+        return response.data;   // { user: { id, name, email, role } }
+        // NOTE: No tokens in response body! Tokens are in cookies only.
+      } catch (error) {
+        return rejectWithValue(error.response?.data || { message: 'Login failed' });
+      }
+    }
+  );
+
+  export const logoutUser = createAsyncThunk(
+    'auth/logout',
+    async (_, { rejectWithValue }) => {
+      try {
+        // Server clears HTTPOnly cookies:
+        //   Set-Cookie: accessToken=; Max-Age=0; HTTPOnly
+        //   Set-Cookie: refreshToken=; Max-Age=0; HTTPOnly
+        await axiosClient.post('/auth/logout');
+      } catch (error) {
+        return rejectWithValue(error.response?.data);
+      }
+    }
+  );
+
+  export const fetchCurrentUser = createAsyncThunk(
+    'auth/fetchCurrentUser',
+    async (_, { rejectWithValue }) => {
+      try {
+        // Browser sends HTTPOnly cookie → server knows who the user is
+        const response = await axiosClient.get('/auth/me');
+        return response.data;   // { id, name, email, role }
+      } catch (error) {
+        return rejectWithValue(error.response?.data);
+      }
+    }
+  );
+
+  // ─── Slice ───
+
+  const authSlice = createSlice({
+    name: 'auth',
+    initialState: {
+      user: null,              // { id, name, email, role }
+      isLoggedIn: false,
+      loading: false,
+      error: null,
+    },
+    reducers: {
+      // Synchronous action — for clearing errors, etc.
+      clearAuthError(state) {
+        state.error = null;
+      },
+    },
+    extraReducers: (builder) => {
+      // ── Login ──
+      builder
+        .addCase(loginUser.pending, (state) => {
+          state.loading = true;
+          state.error = null;
+        })
+        .addCase(loginUser.fulfilled, (state, action) => {
+          state.loading = false;
+          state.user = action.payload.user;
+          state.isLoggedIn = true;
+        })
+        .addCase(loginUser.rejected, (state, action) => {
+          state.loading = false;
+          state.error = action.payload?.message || 'Login failed';
+        })
+
+      // ── Logout ──
+        .addCase(logoutUser.fulfilled, (state) => {
+          state.user = null;
+          state.isLoggedIn = false;
+        })
+
+      // ── Fetch Current User (on app load) ──
+        .addCase(fetchCurrentUser.fulfilled, (state, action) => {
+          state.user = action.payload;
+          state.isLoggedIn = true;
+          state.loading = false;
+        })
+        .addCase(fetchCurrentUser.rejected, (state) => {
+          state.user = null;
+          state.isLoggedIn = false;
+          state.loading = false;
+        })
+        .addCase(fetchCurrentUser.pending, (state) => {
+          state.loading = true;
+        });
+    },
+  });
+
+  export const { clearAuthError } = authSlice.actions;
+
+  // ─── Selectors ───
+  export const selectAuth = (state) => state.auth;
+  export const selectUser = (state) => state.auth.user;
+  export const selectIsLoggedIn = (state) => state.auth.isLoggedIn;
+  export const selectAuthLoading = (state) => state.auth.loading;
+  export const selectAuthError = (state) => state.auth.error;
+
+  export default authSlice.reducer;
+  ```
+
+  ### File 3: `store/slices/accountsSlice.js` — Accounts with createAsyncThunk
+
+  ```jsx
+  // store/slices/accountsSlice.js
+  import { createSlice, createAsyncThunk, createSelector } from '@reduxjs/toolkit';
+  import axiosClient from '../../api/client';
+
+  // ─── Async Thunks ───
+
+  export const fetchAccounts = createAsyncThunk(
+    'accounts/fetchAll',
+    async (_, { rejectWithValue }) => {
+      try {
+        const response = await axiosClient.get('/accounts');
+        return response.data;    // [{ id, name, type, balance }, ...]
+      } catch (error) {
+        return rejectWithValue(error.response?.data || { message: 'Failed to fetch accounts' });
+      }
+    }
+  );
+
+  export const fetchAccountBalance = createAsyncThunk(
+    'accounts/fetchBalance',
+    async (accountId, { rejectWithValue }) => {
+      try {
+        const response = await axiosClient.get(`/accounts/${accountId}/balance`);
+        return { accountId, balance: response.data.balance };
+      } catch (error) {
+        return rejectWithValue(error.response?.data);
+      }
+    }
+  );
+
+  export const initiateTransfer = createAsyncThunk(
+    'accounts/transfer',
+    async (transferData, { dispatch, rejectWithValue }) => {
+      // transferData = { fromAccountId, toAccountId, amount, note }
+      try {
+        const response = await axiosClient.post('/transfers', transferData);
+
+        // After transfer succeeds, refetch accounts to get updated balances
+        dispatch(fetchAccounts());
+
+        return response.data;    // { transactionId, status: 'completed' }
+      } catch (error) {
+        return rejectWithValue(error.response?.data || { message: 'Transfer failed' });
+      }
+    }
+  );
+
+  // ─── Slice ───
+
+  const accountsSlice = createSlice({
+    name: 'accounts',
+    initialState: {
+      list: [],                 // [{ id, name, type, balance }]
+      selectedAccountId: null,
+      loading: false,
+      error: null,
+      transferStatus: 'idle',   // 'idle' | 'loading' | 'success' | 'failed'
+      transferError: null,
+    },
+    reducers: {
+      selectAccount(state, action) {
+        state.selectedAccountId = action.payload;
+      },
+      clearTransferStatus(state) {
+        state.transferStatus = 'idle';
+        state.transferError = null;
+      },
+    },
+    extraReducers: (builder) => {
+      // ── Fetch Accounts ──
+      builder
+        .addCase(fetchAccounts.pending, (state) => {
+          state.loading = true;
+          state.error = null;
+        })
+        .addCase(fetchAccounts.fulfilled, (state, action) => {
+          state.loading = false;
+          state.list = action.payload;
+        })
+        .addCase(fetchAccounts.rejected, (state, action) => {
+          state.loading = false;
+          state.error = action.payload?.message || 'Failed to load accounts';
+        })
+
+      // ── Fetch Balance (updates single account in list) ──
+        .addCase(fetchAccountBalance.fulfilled, (state, action) => {
+          const account = state.list.find(a => a.id === action.payload.accountId);
+          if (account) account.balance = action.payload.balance;
+          //           ↑ Immer lets us "mutate" safely
+        })
+
+      // ── Transfer ──
+        .addCase(initiateTransfer.pending, (state) => {
+          state.transferStatus = 'loading';
+          state.transferError = null;
+        })
+        .addCase(initiateTransfer.fulfilled, (state) => {
+          state.transferStatus = 'success';
+        })
+        .addCase(initiateTransfer.rejected, (state, action) => {
+          state.transferStatus = 'failed';
+          state.transferError = action.payload?.message || 'Transfer failed';
+        });
+    },
+  });
+
+  export const { selectAccount, clearTransferStatus } = accountsSlice.actions;
+
+  // ─── Selectors (memoized with createSelector) ───
+  export const selectAccounts = (state) => state.accounts.list;
+  export const selectAccountsLoading = (state) => state.accounts.loading;
+  export const selectAccountsError = (state) => state.accounts.error;
+  export const selectTransferStatus = (state) => state.accounts.transferStatus;
+  export const selectTransferError = (state) => state.accounts.transferError;
+  export const selectSelectedAccountId = (state) => state.accounts.selectedAccountId;
+
+  // Derived selector — selected account details
+  export const selectSelectedAccount = createSelector(
+    [selectAccounts, selectSelectedAccountId],
+    (accounts, selectedId) => accounts.find(a => a.id === selectedId) || null
+  );
+
+  // Derived selector — total balance across all accounts
+  export const selectTotalBalance = createSelector(
+    [selectAccounts],
+    (accounts) => accounts.reduce((sum, acc) => sum + acc.balance, 0)
+  );
+
+  export default accountsSlice.reducer;
+  ```
+
+  ### File 4: `store/index.js` — configureStore
+
+  ```jsx
+  // store/index.js
+  import { configureStore } from '@reduxjs/toolkit';
+  import authReducer from './slices/authSlice';
+  import accountsReducer from './slices/accountsSlice';
+
+  const store = configureStore({
+    reducer: {
+      auth: authReducer,
+      accounts: accountsReducer,
+      // Add more slices as app grows:
+      // transactions: transactionsReducer,
+      // beneficiaries: beneficiariesReducer,
+      // ui: uiReducer,
+    },
+    // configureStore automatically includes:
+    // ✅ Redux Thunk middleware (for createAsyncThunk)
+    // ✅ Immutability check middleware (dev only)
+    // ✅ Serializable check middleware (dev only)
+    // ✅ Redux DevTools integration
+  });
+
+  export default store;
+  ```
+### File 5: `App.jsx` — Provider + Auth Check on Load
+
+  ```jsx
+  // App.jsx
+  import { Provider, useDispatch, useSelector } from 'react-redux';
+  import { useEffect } from 'react';
+  import store from './store';
+  import { fetchCurrentUser, selectIsLoggedIn, selectAuthLoading } from './store/slices/authSlice';
+
+  function AuthGate({ children }) {
+    const dispatch = useDispatch();
+    const isLoggedIn = useSelector(selectIsLoggedIn);
+    const loading = useSelector(selectAuthLoading);
+
+    useEffect(() => {
+      // On app load, check if user has a valid HTTPOnly session cookie
+      // GET /auth/me → if cookie is valid, server returns user data
+      //              → if cookie is expired, interceptor tries refresh
+      //              → if refresh fails, reducer sets isLoggedIn=false
+      dispatch(fetchCurrentUser());
+    }, [dispatch]);
+
+    if (loading) return <SplashScreen />;
+    if (!isLoggedIn) return <LoginPage />;
+    return children;
+  }
+
+  function App() {
+    return (
+      <Provider store={store}>
+        <ErrorBoundary fallback={<ErrorPage />}>
+          <AuthGate>
+            <BankingApp />
+          </AuthGate>
+        </ErrorBoundary>
+      </Provider>
+    );
+  }
+  ```
+
+  ### File 6: `pages/LoginPage.jsx` — Login Component
+
+  ```jsx
+  // pages/LoginPage.jsx
+  import { useDispatch, useSelector } from 'react-redux';
+  import { loginUser, selectAuthLoading, selectAuthError, clearAuthError } from '../store/slices/authSlice';
+  import { useState } from 'react';
+
+  function LoginPage() {
+    const dispatch = useDispatch();
+    const loading = useSelector(selectAuthLoading);
+    const authError = useSelector(selectAuthError);
+
+    const [credentials, setCredentials] = useState({ email: '', password: '' });
+
+    function handleSubmit(e) {
+      e.preventDefault();
+      dispatch(loginUser(credentials));
+      // ↑ createAsyncThunk runs:
+      //   1. Dispatches auth/login/pending → loading=true
+      //   2. Sends POST /auth/login with credentials
+      //   3. Server validates → sets HTTPOnly cookies → returns user
+      //   4. Dispatches auth/login/fulfilled → user set, isLoggedIn=true
+      //   OR
+      //   4. Dispatches auth/login/rejected → error set
+    }
+
+    return (
+      <form onSubmit={handleSubmit}>
+        {authError && <div className="error-banner">{authError}</div>}
+
+        <input
+          type="email"
+          placeholder="Email"
+          value={credentials.email}
+          onChange={(e) => setCredentials(prev => ({ ...prev, email: e.target.value }))}
+        />
+        <input
+          type="password"
+          placeholder="Password"
+          value={credentials.password}
+          onChange={(e) => setCredentials(prev => ({ ...prev, password: e.target.value }))}
+        />
+
+        <button type="submit" disabled={loading}>
+          {loading ? 'Logging in...' : 'Login'}
+        </button>
+      </form>
+    );
+  }
+  ```
+
+  ### File 7: `pages/TransferPage.jsx` — Transfer Using Redux State
+
+  ```jsx
+  // pages/TransferPage.jsx
+  import { useDispatch, useSelector } from 'react-redux';
+  import { useEffect, useState } from 'react';
+  import {
+    fetchAccounts,
+    initiateTransfer,
+    clearTransferStatus,
+    selectAccounts,
+    selectAccountsLoading,
+    selectTransferStatus,
+    selectTransferError,
+  } from '../store/slices/accountsSlice';
+
+  function TransferPage() {
+    const dispatch = useDispatch();
+    const accounts = useSelector(selectAccounts);
+    const accountsLoading = useSelector(selectAccountsLoading);
+    const transferStatus = useSelector(selectTransferStatus);
+    const transferError = useSelector(selectTransferError);
+
+    const [formData, setFormData] = useState({
+      fromAccountId: '',
+      toAccountId: '',
+      amount: '',
+      note: '',
+    });
+    const [fieldErrors, setFieldErrors] = useState({});
+
+    // Fetch accounts on mount
+    useEffect(() => {
+      dispatch(fetchAccounts());
+    }, [dispatch]);
+
+    // Clear transfer status when leaving page
+    useEffect(() => {
+      return () => dispatch(clearTransferStatus());
+    }, [dispatch]);
+
+    function handleSubmit(e) {
+      e.preventDefault();
+      setFieldErrors({});
+      dispatch(initiateTransfer(formData))
+        .unwrap()
+        // ↑ .unwrap() converts createAsyncThunk result to a plain promise
+        //    fulfilled → resolves with payload
+        //    rejected → rejects with rejectWithValue payload
+        .then(() => {
+          showSuccess('Transfer completed!');
+          setFormData({ fromAccountId: '', toAccountId: '', amount: '', note: '' });
+        })
+        .catch((err) => {
+          if (err.errors) {
+            setFieldErrors(err.errors);    // { amount: "Exceeds daily limit" }
+          }
+          // General error is already in transferError via rejected reducer
+        });
+    }
+
+    if (accountsLoading) return <Spinner />;
+
+    return (
+      <form onSubmit={handleSubmit}>
+        {/* General error */}
+        {transferStatus === 'failed' && !fieldErrors.amount && (
+          <div className="error-banner">{transferError}</div>
+        )}
+
+        {/* Success message */}
+        {transferStatus === 'success' && (
+          <div className="success-banner">Transfer completed successfully!</div>
+        )}
+
+        {/* From Account */}
+        <select
+          value={formData.fromAccountId}
+          onChange={(e) => setFormData(prev => ({ ...prev, fromAccountId: e.target.value }))}
+        >
+          <option value="">Select source account</option>
+          {accounts.map(acc => (
+            <option key={acc.id} value={acc.id}>{acc.name} — ₹{acc.balance}</option>
+          ))}
+        </select>
+
+        {/* Amount */}
+        <input
+          type="number"
+          placeholder="Amount"
+          value={formData.amount}
+          onChange={(e) => setFormData(prev => ({ ...prev, amount: e.target.value }))}
+        />
+        {fieldErrors.amount && <span className="field-error">{fieldErrors.amount}</span>}
+
+        {/* Submit */}
+        <button type="submit" disabled={transferStatus === 'loading'}>
+          {transferStatus === 'loading' ? 'Processing...' : 'Transfer Now'}
+        </button>
+      </form>
+    );
+  }
+  ```
+
+### Complete Request Flow — End to End
+
+  ```
+  User clicks "Transfer Now"
+          │
+          ▼
+  ┌─ TransferPage.jsx ─────────────────────────────────────────────┐
+  │  dispatch(initiateTransfer(formData))                          │
+  │          │                                                     │
+  │          ▼                                                     │
+  │  ┌─ Redux Middleware (Thunk) ────────────────────────────────┐ │
+  │  │  createAsyncThunk runs the async function                  │ │
+  │  │  Dispatches: accounts/transfer/pending                     │ │
+  │  │          │                                                 │ │
+  │  │          ▼                                                 │ │
+  │  │  ┌─ Axios Instance (api/client.js) ─────────────────────┐ │ │
+  │  │  │  withCredentials: true                                │ │ │
+  │  │  │                                                       │ │ │
+  │  │  │  ┌─ Request Interceptor ──────────────────────────┐   │ │ │
+  │  │  │  │  Adds: X-XSRF-TOKEN header (CSRF protection)  │   │ │ │
+  │  │  │  │  NOTE: NO Authorization header!                │   │ │ │
+  │  │  │  │  Cookie is sent automatically by browser       │   │ │ │
+  │  │  │  └────────────────────────────────────────────────┘   │ │ │
+  │  │  │          │                                            │ │ │
+  │  │  │    POST https://api.bank.com/v1/transfers             │ │ │
+  │  │  │    Cookie: accessToken=abc123 (sent by browser)       │ │ │
+  │  │  │          │                                            │ │ │
+  │  │  │  ┌─ Response Interceptor ─────────────────────────┐   │ │ │
+  │  │  │  │  200 → pass through                            │   │ │ │
+  │  │  │  │  401 → POST /auth/refresh (with cookie)        │   │ │ │
+  │  │  │  │        → server sets new cookie                │   │ │ │
+  │  │  │  │        → retry original POST /transfers        │   │ │ │
+  │  │  │  │  422 → reject with validation errors           │   │ │ │
+  │  │  │  └────────────────────────────────────────────────┘   │ │ │
+  │  │  └──────────────────────────────────────────────────────┘ │ │
+  │  │          │                                                 │ │
+  │  │  Dispatches: accounts/transfer/fulfilled (or rejected)     │ │
+  │  └────────────────────────────────────────────────────────────┘ │
+  │          │                                                     │
+  │  ┌─ accountsSlice Reducer ──────────────────────────────────┐  │
+  │  │  pending  → transferStatus='loading'                      │  │
+  │  │  fulfilled → transferStatus='success'                     │  │
+  │  │            → dispatch(fetchAccounts()) [refetch balances]  │  │
+  │  │  rejected → transferStatus='failed', transferError=msg    │  │
+  │  └───────────────────────────────────────────────────────────┘  │
+  │          │                                                     │
+  │  useSelector(selectTransferStatus) → component re-renders     │
+  │  Shows: success banner / error banner / field errors          │
+  └────────────────────────────────────────────────────────────────┘
+  ```
+
+  ### 401 Token Refresh with HTTPOnly Cookies
+
+  ```
+  User's accessToken cookie expires (15 min TTL)
+          │
+          ▼
+  Component dispatches fetchAccounts()
+          │
+          ▼
+  createAsyncThunk → axiosClient.get('/accounts')
+          │
+          ▼
+  Browser sends: Cookie: accessToken=<expired>
+          │
+          ▼
+  Server returns 401
+          │
+          ▼
+  Response Interceptor catches 401:
+    │
+    ├──→ POST /auth/refresh  (withCredentials: true)
+    │    Browser sends: Cookie: refreshToken=<valid>
+    │    Server validates refreshToken
+    │    Server responds with:
+    │      Set-Cookie: accessToken=<new_token>; HTTPOnly; Secure
+    │      Status: 200
+    │
+    ├──→ Retry original: GET /accounts
+    │    Browser sends: Cookie: accessToken=<new_token>  ← auto!
+    │    Server responds with account data
+    │
+    └──→ createAsyncThunk dispatches accounts/fetchAll/fulfilled
+        Component renders accounts
+        USER NEVER KNEW THE TOKEN EXPIRED!
+  ```
+
+  ### Server-Side Cookie Setup (What Backend Must Do)
+
+  ```
+    // Express.js example — what server sends on login
+    res.cookie('accessToken', jwt, {
+      httpOnly: true,        // ← JavaScript CANNOT read this
+      secure: true,          // ← Only sent over HTTPS
+      sameSite: 'strict',    // ← Not sent on cross-site requests (CSRF protection)
+      maxAge: 15 * 60 * 1000,  // ← 15 minutes
+      path: '/',             // ← Sent with all requests to this domain
+    });
+
+    res.cookie('refreshToken', refreshJwt, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000,  // ← 7 days
+      path: '/auth/refresh',   // ← ONLY sent to refresh endpoint (security!)
+    });
+
+    // CSRF token — this one IS readable by JavaScript
+    res.cookie('XSRF-TOKEN', csrfToken, {
+      httpOnly: false,       // ← JavaScript CAN read this (needed for header)
+      secure: true,
+      sameSite: 'strict',
+    });
+  ```
+
+  ### File Structure Summary
+
+  ```
+  src/
+  ├── api/
+  │   └── client.js                # Axios + withCredentials + interceptors + CSRF
+  ├── store/
+  │   ├── index.js                 # configureStore (auth + accounts reducers)
+  │   └── slices/
+  │       ├── authSlice.js         # createSlice + loginUser/logoutUser/fetchCurrentUser thunks
+  │       └── accountsSlice.js     # createSlice + fetchAccounts/initiateTransfer thunks + selectors
+  ├── App.jsx                      # Provider + AuthGate + ErrorBoundary
+  └── pages/
+      ├── LoginPage.jsx            # Login form → dispatch(loginUser)
+      └── TransferPage.jsx         # Transfer form → dispatch(initiateTransfer)
+  ```
+
+  ### RTK (this example) vs RTK Query (Q53b) — When To Use Which
+
+  | Feature | RTK + createAsyncThunk (this) | RTK Query (Q53b in API doc) |
+  |---|---|---|
+  | State management | Manual (createSlice + reducers) | Automatic (hook return values) |
+  | Caching | You build it | Built-in |
+  | Loading/error states | You write pending/fulfilled/rejected | Automatic isLoading/isError |
+  | Code per endpoint | ~30-50 lines (thunk + reducer cases) | ~5-10 lines (query/mutation) |
+  | Control level | Full control over every action | Declarative, less control |
+  | Best for | Complex business logic, offline-first | Standard CRUD, server state |
+  | When I'd use it | Auth flows, multi-step business logic | Data fetching + caching |
+
+  **Interview tip:** "For the auth layer, I use traditional RTK with createSlice because login/logout involves complex side effects — setting cookies, redirecting, checking session on load. For data fetching like accounts and transactions, I'd layer RTK Query on top of the same Axios client using axiosBaseQuery. Both approaches coexist in the same store."
+
+  ---
+
+  ## Quick Revision Checklist
+
+  - [ ] Redux data flow: Action → Reducer → Store → View
+  - [ ] Redux Toolkit benefits over traditional Redux
+  - [ ] `createSlice`, `createAsyncThunk`, `RTK Query`
+  - [ ] Thunk (simple) vs Saga (complex)
+  - [ ] Context API vs Redux and performance
+  - [ ] Store structure for financial apps
+  - [ ] Memoized selectors with `createSelector`
+  - [ ] Optimistic updates pattern
+  - [ ] `redux-persist` for state persistence
+  - [ ] Normalized state with `createEntityAdapter`
+  - [ ] Migration from legacy connect to hooks + RTK
+  - [ ] Side effect approaches compared
+  - [ ] RTK immutability via Immer: Proxy drafts, structural sharing, createReducer
+  - [ ] Redux Saga: watcher/worker, call/put/takeLatest, polling, retry, race
+  - [ ] RTK Query deep dive: middleware line, cache-first, deduplication, polling lifecycle, tags
+  - [ ] Anti-pattern: manual Redux for server state vs RTK Query
+  - [ ] Master diagram: components → middleware → reducers → store
+  - [ ] State ownership map: local vs Context vs Redux vs RTK Query
+  - [ ] 8 trick questions with senior-level answers
+  - [ ] Complete production code: RTK + Axios + Interceptors + HTTPOnly cookie auth
+  - [ ] HTTPOnly vs localStorage token security comparison
+  - [ ] CSRF protection with XSRF-TOKEN header
+
+

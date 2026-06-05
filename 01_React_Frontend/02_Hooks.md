@@ -746,4 +746,157 @@ function TransactionSearch({ transactions }) {
 | `useTransition` | `useDeferredValue` |
 |---|---|
 | You control which setState is low priority | React defers a value automatically |
-| You wrap the setter: `startTransition(() => {...})` | You wrap the value: `useDeferredValue(v
+| You wrap the setter: `startTransition(() => {...})` | You wrap the value: `useDeferredValue(value)` |
+| Use when you own the state update | Use when you receive a value as prop |
+
+---
+
+## Q26. How do you test custom hooks? What tools/patterns do you use?
+
+**Answer:**
+
+Use `@testing-library/react`'s `renderHook` utility.
+
+```jsx
+// hook: useCounter.js
+function useCounter(initialValue = 0) {
+  const [count, setCount] = useState(initialValue);
+  const increment = () => setCount(c => c + 1);
+  const decrement = () => setCount(c => c - 1);
+  const reset = () => setCount(initialValue);
+  return { count, increment, decrement, reset };
+}
+```
+
+```jsx
+// test: useCounter.test.js
+import { renderHook, act } from '@testing-library/react';
+import useCounter from './useCounter';
+
+test('should initialize with default value', () => {
+  const { result } = renderHook(() => useCounter());
+  expect(result.current.count).toBe(0);
+});
+
+test('should initialize with custom value', () => {
+  const { result } = renderHook(() => useCounter(10));
+  expect(result.current.count).toBe(10);
+});
+
+test('should increment', () => {
+  const { result } = renderHook(() => useCounter());
+  act(() => {
+    result.current.increment();
+  });
+  expect(result.current.count).toBe(1);
+});
+
+test('should reset to initial value', () => {
+  const { result } = renderHook(() => useCounter(5));
+  act(() => {
+    result.current.increment();
+    result.current.increment();
+    result.current.reset();
+  });
+  expect(result.current.count).toBe(5);
+});
+```
+
+**Testing hooks with async operations:**
+```jsx
+test('useFetch should return data', async () => {
+  global.fetch = jest.fn(() =>
+    Promise.resolve({ ok: true, json: () => Promise.resolve({ balance: 50000 }) })
+  );
+
+  const { result } = renderHook(() => useFetch('/api/balance'));
+
+  // Wait for async operation
+  await waitFor(() => {
+    expect(result.current.loading).toBe(false);
+  });
+
+  expect(result.current.data).toEqual({ balance: 50000 });
+});
+```
+
+---
+
+
+## Q27. What is `useId` hook in React 18? Why was it introduced?
+
+**Answer:**
+
+`useId` generates a **unique ID** that is consistent between server and client rendering (SSR-safe).
+
+**Problem it solves:**
+```jsx
+// ❌ BAD - IDs might clash or differ between server and client
+function LoginForm() {
+  return (
+    <div>
+      <label htmlFor="email">Email</label>
+      <input id="email" />  {/* What if two LoginForms on the same page? */}
+    </div>
+  );
+}
+```
+
+```jsx
+// ✅ GOOD - useId generates unique, SSR-safe IDs
+function LoginForm() {
+  const id = useId();
+
+  return (
+    <div>
+      <label htmlFor={`${id}-email`}>Email</label>
+      <input id={`${id}-email`} />
+
+      <label htmlFor={`${id}-password`}>Password</label>
+      <input id={`${id}-password`} type="password" />
+    </div>
+  );
+}
+
+// First instance: id = ":r1:" → ":r1:-email", ":r1:-password"
+// Second instance: id = ":r2:" → ":r2:-email", ":r2:-password"
+// No clashes! ✅
+```
+
+**Accessibility use case (aria-describedby):**
+```jsx
+function AmountField({ error }) {
+  const id = useId();
+ 
+  return (
+    <div>
+      <label htmlFor={`${id}-amount`}>Transfer Amount</label>
+      <input
+        id={`${id}-amount`}
+        aria-describedby={error ? `${id}-error` : undefined}
+      />
+      {error && <span id={`${id}-error`} role="alert">{error}</span>}
+    </div>
+  );
+}
+```
+
+**Important:** Don't use `useId` for list keys. It's for HTML `id` attributes only.
+
+---
+
+## Quick Revision Checklist
+
+- [ ] Rules of hooks (top-level, React functions only)
+- [ ] `useMemo` (cache value) vs `useCallback` (cache function)
+- [ ] `useRef` for DOM refs, previous values, interval IDs
+- [ ] `useEffect` cleanup order with multiple effects
+- [ ] Custom hook: `useDebounce` pattern
+- [ ] `useReducer` for complex related state
+- [ ] `useLayoutEffect` runs before paint (for DOM measurements)
+- [ ] `useFetch` with caching, retry, and abort
+- [ ] Stale closures and 3 solutions
+- [ ] `useTransition` vs `useDeferredValue`
+- [ ] Testing hooks with `renderHook` and `act`
+- [ ] `useId` for SSR-safe unique IDs
+
