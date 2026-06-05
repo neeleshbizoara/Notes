@@ -669,3 +669,60 @@ Flame chart:
 ┌──── App (2ms) ────────────────────────────────┐
 │  ┌── Header (0.5ms) ──┐  ┌── Dashboard (45ms) ──────────────────┐  │
 │  │                     │  │  ┌── AccountList (3ms) ┐  ┌── Chart (38ms) ──┐  │
+│  │                     │  │  │                     │  │   ← SLOW!        │  │
+│  └─────────────────────┘  └──────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Common findings and fixes:**
+
+```jsx
+// Finding 1: Component re-renders when props haven't changed
+// Fix: React.memo
+const Chart = React.memo(function Chart({ data }) {
+  // Expensive chart rendering
+});
+
+// Finding 2: Component is slow because of expensive calculation in render
+// Fix: useMemo
+function Dashboard({ transactions }) {
+  const chartData = useMemo(() =>
+    aggregateByMonth(transactions), // Takes 30ms
+    [transactions]
+  );
+}
+
+// Finding 3: Parent re-render causes ALL children to re-render
+// Fix: Move state down closer to where it's used
+// Before: State in App → everything re-renders
+// After: State in SearchBar → only SearchBar re-renders
+```
+
+**Programmatic Profiler component:**
+```jsx
+function onRenderCallback(id, phase, actualDuration, baseDuration, startTime, commitTime) {
+  if (actualDuration > 16) {
+    console.warn(`⚠️ Slow render: ${id} took ${actualDuration.toFixed(1)}ms (${phase})`);
+    // Send to monitoring service in production
+  }
+}
+
+<Profiler id="TransactionTable" onRender={onRenderCallback}>
+  <TransactionTable data={data} />
+</Profiler>
+```
+
+---
+
+## Quick Revision Checklist
+
+- [ ] Performance debugging tools (React Profiler, Chrome DevTools, Lighthouse)
+- [ ] React.memo / useMemo / useCallback — when they help vs hurt
+- [ ] Preventing sibling re-renders — localize state → children pattern → React.memo
+- [ ] Web Vitals: LCP, FID/INP, CLS — how to measure and improve
+- [ ] Virtualization for 10,000+ row tables (react-window)
+- [ ] react-window (6KB, simple) vs react-virtualized (35KB, feature-rich)
+- [ ] Bundle size analysis and reduction techniques
+- [ ] Pagination vs Infinite Scroll trade-offs
+- [ ] React Profiler step-by-step debugging process
+

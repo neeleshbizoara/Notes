@@ -741,4 +741,108 @@ const deep1 = JSON.parse(JSON.stringify(original));
 
 const obj = {
   date: new Date(),          // Becomes string: "2026-04-22T..."
-  fn: ()
+  fn: () => 'hello',         // LOST! undefined
+  undef: undefined,          // LOST!
+  regex: /test/g,            // Becomes empty object: {}
+  map: new Map([['a', 1]])   // Becomes empty object: {}
+};
+
+// Method 2: structuredClone (modern way — built-in)
+const deep2 = structuredClone(original);
+// ✅ Handles: Date, Map, Set, ArrayBuffer, RegExp, circular references
+// ❌ Cannot handle: functions, DOM nodes, Error objects
+
+const obj2 = {
+  date: new Date(),           // ✅ Stays Date
+  map: new Map([['a', 1]]),   // ✅ Stays Map
+  fn: () => 'hello'           // ❌ Error! Can't clone functions
+};
+const clone = structuredClone(obj2);  // Throws DOMException!
+```
+
+**Comparison:**
+
+| Feature | `JSON.parse(JSON.stringify())` | `structuredClone` |
+|---|---|---|
+| Functions | Silently drops | Throws error |
+| Date | Becomes string | Stays Date |
+| Map/Set | Becomes empty `{}` | Cloned correctly |
+| Circular references | Throws error | Handles correctly |
+| `undefined` | Dropped | Preserved |
+| Performance | Slower | Faster |
+| Browser support | All | Modern browsers (2022+) |
+
+---
+
+## Q51. What are tagged template literals? Give a use case (e.g., styled-components).
+
+**Answer:**
+
+A **tagged template** is a function that processes a template literal. The function receives the string parts and the interpolated values separately.
+
+```javascript
+// Basic tagged template
+function highlight(strings, ...values) {
+  // strings = ['Hello, ', '! Your balance is ₹', '.']
+  // values = ['Neelesh', 50000]
+  return strings.reduce((result, str, i) => {
+    return result + str + (values[i] ? `<b>${values[i]}</b>` : '');
+  }, '');
+}
+
+const name = 'Neelesh';
+const balance = 50000;
+const html = highlight`Hello, ${name}! Your balance is ₹${balance}.`;
+// "Hello, <b>Neelesh</b>! Your balance is ₹<b>50000</b>."
+```
+
+**Use case: SQL injection prevention:**
+```javascript
+function sql(strings, ...values) {
+  return {
+    text: strings.join('$'),  // Parameterized query
+    values: values             // Safe parameters
+  };
+}
+
+const userId = "1; DROP TABLE accounts;--";  // SQL injection attempt!
+const query = sql`SELECT * FROM accounts WHERE user_id = ${userId}`;
+// { text: "SELECT * FROM accounts WHERE user_id = $", values: ["1; DROP TABLE accounts;--"] }
+// The value is parameterized, not concatenated — SAFE! ✅
+```
+
+**styled-components (React CSS-in-JS library):**
+```jsx
+import styled from 'styled-components';
+
+// `styled.div` is a TAG FUNCTION
+const AccountCard = styled.div`
+  background: ${props => props.active ? '#e8f5e9' : '#fff'};
+  border: 1px solid ${props => props.active ? '#4caf50' : '#ddd'};
+  padding: 16px;
+  border-radius: 8px;
+`;
+
+// Usage:
+<AccountCard active={true}>
+  Savings Account — ₹50,000
+</AccountCard>
+```
+
+---
+
+## Quick Revision Checklist
+
+- [ ] Closures and how React hooks use them internally
+- [ ] Event loop: microtasks (Promises) vs macrotasks (setTimeout)
+- [ ] Promise.all / allSettled / race / any
+- [ ] var (function scope) vs let/const (block scope) + Temporal Dead Zone
+- [ ] Prototypal inheritance + class is syntactic sugar
+- [ ] Generators (yield/next) for pagination and Redux Saga
+- [ ] WeakMap/WeakSet for preventing memory leaks
+- [ ] Debounce vs Throttle implementations
+- [ ] `this` in 8 different contexts
+- [ ] Proxy/Reflect for validation and framework reactivity
+- [ ] Deep copy: structuredClone vs JSON trick
+- [ ] Tagged template literals (styled-components, SQL safety)
+

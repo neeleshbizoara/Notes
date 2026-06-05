@@ -54,7 +54,7 @@ ReactJS_Interview_Prep/
 │
 └── 07_Preparation_Plans/                ← Study roadmaps
     ├── FullStack_Lead_Preparation_Plan.md   Full Stack Lead JD mapping
-    └── GVRT_FrontEnd_Lead_Preparation_Plan.md  GVRT role JD mapping
+    └── FrontEnd_Lead_Preparation_Plan.md 
 ```
 
 ---

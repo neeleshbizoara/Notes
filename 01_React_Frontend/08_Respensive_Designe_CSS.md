@@ -695,4 +695,28 @@ Accessibility is a core part of my development workflow. I combine semantic HTML
 ---
 Unit |  Relative To Main | Use Case
 -----|-------------------|----------
-rem Root | <html> element | Standardized font sizes, margins, a
+rem Root | <html> element | Standardized font sizes, margins, and padding
+em |  Parent or current element | Component-specific scaling (e.g., button icons)
+vw / vh | Viewport width / height | Elements that scale based on browser window size
+% | Parent container |  Fluid widths and simple responsive layouts
+
+**Why use rem over px?**
+
+<i>Using rem ensures that if a user changes their browser's default font size for accessibility reasons, your entire layout will scale to match their preference. Using px locks the size and can make content unreadable for users with vision impairments.</i>
+---
+
+**content-box (Default):** The width and height only apply to the content. If you add padding or a border, the element grows larger than the size you set.
+- Example: A 100px wide box + 20px padding + 5px border = 130px total width.
+
+**border-box:** The width and height include the content, padding, and border. The element stays the exact size you specified.
+- Example: A 100px wide box + 20px padding + 5px border = 100px total width (the content area simply shrinks to fit).
+## Quick Revision Checklist
+
+- [ ] CSS Modules vs styled-components vs Tailwind (trade-offs)
+- [ ] Mobile-first responsive design (min-width media queries)
+- [ ] CSS contain property for performance
+- [ ] Flexbox (1D) vs Grid (2D) — when to use which
+- [ ] Cross-browser compatibility tools (autoprefixer, browserslist, @supports)
+- [ ] Dark mode with CSS variables + context + localStorage
+- [ ] Accessibility: keyboard nav, focus trap, ARIA roles, skip links, live regions
+
