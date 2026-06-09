@@ -1,7 +1,5 @@
 # Section 2: React Hooks (12 Questions & Answers)
 
-
-
 ---
 
 ## Q16. What are the rules of hooks and why do they exist?
@@ -268,6 +266,195 @@ function Dashboard() {
 // "Effect B: cleanup"
 ```
 
+### Why is my `useEffect` cleanup running on every render → commit cycle?
+
+If your cleanup function runs on **every single render-to-commit cycle**, React is repeatedly stopping the previous effect and starting a new one. This is normal **only when the effect is supposed to re-synchronize**. If it happens unexpectedly, usually one of these three things is happening.
+
+**Lifecycle flow:**
+```
+1. Render Phase
+   React calculates the next UI
+
+2. Commit Phase
+   React updates the real DOM
+
+3. Cleanup Old Effect
+   Runs with OLD props/state
+
+4. Run New Effect
+   Runs with NEW props/state
+```
+
+**Important mental model:** cleanup does **not** only mean unmount. It also runs before the next effect setup whenever dependencies change.
+
+---
+
+#### Cause 1: Missing dependency array — most common
+
+If you omit the dependency array completely, React runs the effect after **every commit**. If the effect returns cleanup, that cleanup also runs before every next effect execution.
+
+```jsx
+// ❌ Broken: no dependency array
+function PriceTicker() {
+  useEffect(() => {
+    console.log('Setup runs');
+
+    return () => {
+      console.log('Cleanup runs before EVERY next commit effect');
+    };
+  }); // 🚨 Missing dependency array
+}
+```
+
+**Fix based on intention:**
+
+```jsx
+// ✅ Run setup once on mount, cleanup once on unmount
+useEffect(() => {
+  const connection = connectToMarketFeed();
+  return () => connection.close();
+}, []);
+
+// ✅ Re-run only when userId changes
+useEffect(() => {
+  const subscription = subscribeToUser(userId);
+  return () => subscription.unsubscribe();
+}, [userId]);
+```
+
+**Interview line:** "No dependency array means after every commit. Empty dependency array means mount/unmount. A filled dependency array means mount plus re-run when one dependency changes."
+
+---
+
+#### Cause 2: Unstable object, array, or function dependencies
+
+React compares dependencies using `Object.is`. Primitive values like strings and numbers compare by value, but objects, arrays, and functions compare by **reference**. If you create them inside the component body, they are new on every render.
+
+```jsx
+// ❌ Broken: options is a new object on every render
+function ChatRoom({ roomId }) {
+  const options = {
+    serverUrl: 'wss://prices.bank.com',
+    roomId,
+  };
+
+  useEffect(() => {
+    const connection = connect(options);
+    connection.open();
+    return () => connection.close();
+  }, [options]); // 🚨 Different reference every render
+
+  return <h1>Room: {roomId}</h1>;
+}
+```
+
+Even if `options.roomId` did not change, this is still true:
+
+```jsx
+Object.is(
+  { roomId: 'general' },
+  { roomId: 'general' }
+); // false
+```
+
+**Better fix 1 — create object inside the effect and depend on primitives:**
+
+```jsx
+// ✅ Best: depend on primitive values
+function ChatRoom({ roomId }) {
+  useEffect(() => {
+    const options = {
+      serverUrl: 'wss://prices.bank.com',
+      roomId,
+    };
+
+    const connection = connect(options);
+    connection.open();
+    return () => connection.close();
+  }, [roomId]);
+}
+```
+
+**Better fix 2 — move static values outside component:**
+
+```jsx
+const serverUrl = 'wss://prices.bank.com';
+
+function ChatRoom({ roomId }) {
+  useEffect(() => {
+    const connection = connect({ serverUrl, roomId });
+    connection.open();
+    return () => connection.close();
+  }, [roomId]);
+}
+```
+
+**Last-resort fix — memoize references:**
+
+```jsx
+const options = useMemo(() => ({
+  serverUrl: 'wss://prices.bank.com',
+  roomId,
+}), [roomId]);
+
+useEffect(() => {
+  const connection = connect(options);
+  connection.open();
+  return () => connection.close();
+}, [options]);
+```
+
+**React 19 note:** The React Compiler can reduce some manual memoization in compiler-compatible code, but you should still understand dependency identity. For effects, the cleanest fix is often to move object/function creation **inside the effect** or depend on primitive values.
+
+---
+
+#### Cause 3: React Strict Mode in development
+
+In development, `React.StrictMode` intentionally runs this sequence on first mount:
+
+```
+Setup → Cleanup → Setup
+```
+
+This is a stress test. React is checking whether your cleanup correctly reverses your setup.
+
+```jsx
+useEffect(() => {
+  const ws = new WebSocket('wss://prices.bank.com/live');
+  console.log('Connected');
+
+  return () => {
+    ws.close();
+    console.log('Disconnected');
+  };
+}, []);
+```
+
+In development you may see:
+
+```
+Connected
+Disconnected
+Connected
+```
+
+**Do not "fix" this with a ref just to stop the second execution.** If the duplicate dev run reveals duplicate subscriptions, timers, or connections, the real fix is proper cleanup. This extra setup-cleanup-setup cycle does **not** happen in production builds.
+
+---
+
+#### Debugging checklist
+
+| Symptom | Likely Cause | Fix |
+|---|---|---|
+| Cleanup runs on every render | No dependency array | Add `[]` or correct dependencies |
+| Cleanup runs when unrelated input changes | Object/function dependency changes every render | Move object/function inside effect or depend on primitives |
+| Cleanup runs twice only on first mount in dev | `React.StrictMode` | Keep cleanup correct; production is not double-mounted |
+| Effect reconnects on every message/count update | Effect depends on state it updates | Use functional state update or split effects |
+| Effect creates infinite loop | Effect sets state that changes its own dependencies | Add condition, refactor, or remove unnecessary effect |
+
+**Senior interview summary:**
+> "An effect is a synchronization process. React starts it after commit and stops the previous one before starting the next one if dependencies changed. If cleanup happens every render, I first check for a missing dependency array, unstable object/function dependencies, or Strict Mode's development-only remount behavior."
+
 **Banking app real example — WebSocket + Analytics:**
 ```jsx
 function TradingDashboard({ symbol }) {
@@ -371,7 +558,6 @@ User stops typing → 300ms passes → API called with "REL"
 **With debounce:** 1 API call (REL) ✅
 
 ---
-
 ## Q21. What is `useReducer`? When would you prefer it over `useState`?
 
 **Answer:**
@@ -680,6 +866,7 @@ function PriceTracker({ symbol }) {
 
 ---
 
+
 ## Q25. Explain `useTransition` and `useDeferredValue` from React 18. Give a financial dashboard use case.
 
 **Answer:**
@@ -822,7 +1009,6 @@ test('useFetch should return data', async () => {
 
 ---
 
-
 ## Q27. What is `useId` hook in React 18? Why was it introduced?
 
 **Answer:**
@@ -885,12 +1071,14 @@ function AmountField({ error }) {
 
 ---
 
+
 ## Quick Revision Checklist
 
 - [ ] Rules of hooks (top-level, React functions only)
 - [ ] `useMemo` (cache value) vs `useCallback` (cache function)
 - [ ] `useRef` for DOM refs, previous values, interval IDs
 - [ ] `useEffect` cleanup order with multiple effects
+- [ ] Why `useEffect` cleanup runs on every render/commit
 - [ ] Custom hook: `useDebounce` pattern
 - [ ] `useReducer` for complex related state
 - [ ] `useLayoutEffect` runs before paint (for DOM measurements)
@@ -899,4 +1087,7 @@ function AmountField({ error }) {
 - [ ] `useTransition` vs `useDeferredValue`
 - [ ] Testing hooks with `renderHook` and `act`
 - [ ] `useId` for SSR-safe unique IDs
+
+
+
 
